@@ -29,6 +29,7 @@ class UVCCameraView(context: Context) : FrameLayout(context), LifecycleEventList
     private const val DEFAULT_ROTATION = 180
     private const val DEFAULT_ZOOM = 500
     private const val DEFAULT_VENDOR_ID = 3034
+    private const val DEFAULT_FPS = 25
   }
 
   private val reactContext: ReactContext
@@ -210,6 +211,7 @@ class UVCCameraView(context: Context) : FrameLayout(context), LifecycleEventList
         widthDiff + heightDiff
       } ?: supportedSizes.first()
 
+    selectedSize.fps = DEFAULT_FPS
     helper.previewSize = selectedSize
     mCameraViewMain.setAspectRatio(selectedSize.width, selectedSize.height)
   }
