@@ -10,7 +10,7 @@ This is a wrapper for the [UVCAndroid](https://github.com/shiyinghan/UVCAndroid)
 ## Installation
 
 ```sh
-npm install @jaswinda/react-native-uvc-camera
+npm install @prasiddha-n/react-native-uvc-camera
 ```
 
 ## Usage

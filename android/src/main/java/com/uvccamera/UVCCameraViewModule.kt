@@ -55,6 +55,32 @@ class UVCCameraViewModule(reactContext: ReactApplicationContext?) :
   }
 
   @ReactMethod
+  fun setContrast(viewTag: Int, contrast: Int) {
+    val view = findCameraView(viewTag)
+    view.setContrast(contrast)
+  }
+
+  /**
+   * Temporary alias to avoid breaking older JS that calls the misspelled method.
+   */
+  @ReactMethod
+  fun setContast(viewTag: Int, contrast: Int) {
+    setContrast(viewTag, contrast)
+  }
+
+  @ReactMethod
+  fun setSaturation(viewTag: Int, saturation: Int) {
+    val view = findCameraView(viewTag)
+    view.setSaturation(saturation)
+  }
+
+  @ReactMethod
+  fun setSharpness(viewTag: Int, sharpness: Int) {
+    val view = findCameraView(viewTag)
+    view.setSharpness(sharpness)
+  }
+
+  @ReactMethod
   fun setZoom(viewTag: Int, zoom: Int) {
     val view = findCameraView(viewTag)
     view.setZoom(zoom)

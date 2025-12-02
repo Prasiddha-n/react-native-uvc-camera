@@ -13,9 +13,13 @@ import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 suspend inline fun UVCCameraView.takePicture() = suspendCoroutine { cont ->
+  val helper = this.mCameraHelper ?: run {
+    cont.resumeWithException(IllegalStateException("Camera is not initialized"))
+    return@suspendCoroutine
+  }
   val file = FileUtils.getCaptureFile(context, Environment.DIRECTORY_DCIM, ".jpg")
   val options = ImageCapture.OutputFileOptions.Builder(file).build()
-  this.mCameraHelper!!.takePicture(
+  helper.takePicture(
     options,
     object : ImageCapture.OnImageCaptureCallback {
       override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {

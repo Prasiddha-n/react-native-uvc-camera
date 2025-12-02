@@ -1,6 +1,6 @@
 {
-  "name": "@jaswinda/react-native-uvc-camera",
-  "version": "0.2.8",
+  "name": "@prasiddha-n/react-native-uvc-camera",
+  "version": "0.2.9",
   "description": "UVC Camera for RN",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
@@ -43,13 +43,13 @@
     "uvc-camera",
     "android"
   ],
-  "repository": "https://github.com/jaswinda/react-native-uvc-camera",
-  "author": "jaswinda <singhjassi2624@gmail.com> (https://github.com/jaswinda)",
+  "repository": "https://github.com/prasiddha-n/react-native-uvc-camera",
+  "author": "prasiddha-n <prasiddha.neupane@resimator.fi> (https://github.com/prasiddha-n)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/jaswinda/react-native-uvc-camera/issues"
+    "url": "https://github.com/prasiddha-n/react-native-uvc-camera/issues"
   },
-  "homepage": "https://github.com/jaswinda/react-native-uvc-camera#readme",
+  "homepage": "https://github.com/prasiddha-n/react-native-uvc-camera#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },

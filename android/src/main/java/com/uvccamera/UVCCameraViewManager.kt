@@ -10,4 +10,8 @@ class UVCCameraViewManager : SimpleViewManager<UVCCameraView>() {
     return UVCCameraView(reactContext)
   }
 
+  override fun onDropViewInstance(view: UVCCameraView) {
+    super.onDropViewInstance(view)
+    view.cleanup()
+  }
 }

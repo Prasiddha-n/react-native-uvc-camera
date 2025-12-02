@@ -5,161 +5,106 @@ import android.hardware.usb.UsbDevice
 import android.util.Log
 import android.view.SurfaceHolder
 import android.widget.FrameLayout
+import com.facebook.react.bridge.LifecycleEventListener
 import com.facebook.react.bridge.ReactContext
 import com.herohan.uvcapp.CameraHelper
 import com.herohan.uvcapp.ICameraHelper
-import com.serenegiant.usb.Size
-import com.serenegiant.usb.UVCCamera;
-import com.serenegiant.widget.AspectRatioSurfaceView
-import android.widget.Toast;
-import com.serenegiant.usb.UVCControl
 import com.serenegiant.opengl.renderer.MirrorMode
+import com.serenegiant.usb.Size
+import com.serenegiant.widget.AspectRatioSurfaceView
+import kotlin.math.abs
 
 const val TAG = "UVCCameraView"
 
-class UVCCameraView(context: Context) : FrameLayout(context) {
+class UVCCameraView(context: Context) : FrameLayout(context), LifecycleEventListener {
 
   companion object {
     private const val DEBUG = true
+    private const val PREF_CAMERA = "camera"
+    private const val PREF_WIDTH = "width"
+    private const val PREF_HEIGHT = "height"
+    private const val PREF_VENDOR_ID = "defaultCameraVendorId"
+    private const val DEFAULT_WIDTH = 2592
+    private const val DEFAULT_HEIGHT = 1944
+    private const val DEFAULT_ROTATION = 180
+    private const val DEFAULT_ZOOM = 500
+    private const val DEFAULT_VENDOR_ID = 3034
   }
-
-
-  var mCameraHelper: ICameraHelper? = null
-  private val mCameraViewMain: AspectRatioSurfaceView
-
 
   private val reactContext: ReactContext
     get() = context as ReactContext
 
-  init {
-    mCameraViewMain = AspectRatioSurfaceView(reactContext)
-    mCameraViewMain.layoutParams =
-      LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-    mCameraViewMain.holder.addCallback(object : SurfaceHolder.Callback {
-      override fun surfaceCreated(holder: SurfaceHolder) {
-        Log.d(TAG, "surfaceCreated() called with: holder = $holder")
-        mCameraHelper?.addSurface(holder.surface, false)
+  var mCameraHelper: ICameraHelper? = null
+    private set
+  private val mCameraViewMain: AspectRatioSurfaceView =
+    AspectRatioSurfaceView(reactContext).apply {
+      layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+    }
 
-        initCameraHelper()
+  private val cameraPrefs by lazy {
+    reactContext.getSharedPreferences(PREF_CAMERA, Context.MODE_PRIVATE)
+  }
+
+  private var hasSurface = false
+  private var shouldResumeCamera = false
+  private var lifecycleRegistered = false
+
+  private val surfaceCallback = object : SurfaceHolder.Callback {
+    override fun surfaceCreated(holder: SurfaceHolder) {
+      if (DEBUG) Log.d(TAG, "surfaceCreated() holder=$holder")
+      hasSurface = true
+      ensureCameraHelper()
+      mCameraHelper?.addSurface(holder.surface, false)
+      if (shouldResumeCamera) {
+        selectPreferredDevice()
       }
+    }
 
-      override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        
-      }
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
 
-      override fun surfaceDestroyed(holder: SurfaceHolder) {
-        Log.d(TAG, "surfaceDestroyed() called with: holder = $holder")
-        mCameraHelper?.removeSurface(holder.surface)
-        clearCameraHelper()
-      }
-    })
-    addView(mCameraViewMain)
-
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+      if (DEBUG) Log.d(TAG, "surfaceDestroyed() holder=$holder")
+      hasSurface = false
+      mCameraHelper?.removeSurface(holder.surface)
+      closeCameraInternal(keepResumeFlag = true)
+    }
   }
 
   private val mStateListener: ICameraHelper.StateCallback = object : ICameraHelper.StateCallback {
     override fun onAttach(device: UsbDevice) {
-      if (DEBUG) Log.v(TAG, "onAttach:")
-      selectDevice(device)
+      if (DEBUG) Log.v(TAG, "onAttach:${device.deviceName}")
+      if (shouldResumeCamera) {
+        post { selectPreferredDevice() }
+      }
     }
 
     override fun onDeviceOpen(device: UsbDevice, isFirstOpen: Boolean) {
-      if (DEBUG) Log.v(TAG, "onDeviceOpen:")
+      if (DEBUG) Log.v(TAG, "onDeviceOpen:$isFirstOpen")
       mCameraHelper?.openCamera()
     }
 
     override fun onCameraOpen(device: UsbDevice) {
       if (DEBUG) Log.v(TAG, "onCameraOpen:")
       mCameraHelper?.run {
-        val portraitSizeList = ArrayList<Size>()
-        for (size in supportedSizeList) {
-          // if (size.width < size.height) {
-            portraitSizeList.add(size)
-          // }
+        configurePreviewSize(this)
+        try {
+          previewConfig = previewConfig?.setRotation(DEFAULT_ROTATION % 360)
+          previewConfig = previewConfig?.setMirror(MirrorMode.MIRROR_HORIZONTAL)
+        } catch (t: Throwable) {
+          Log.w(TAG, "Unable to update preview config", t)
         }
-        Log.d(TAG, "portraitSizeList: $portraitSizeList")
-        val size = portraitSizeList[0]
-        //get the values from SharedPreferences
-        val sharedPref = reactContext.getSharedPreferences("camera", Context.MODE_PRIVATE)
-        // val width = sharedPref.getInt("width", 2048)
-        // val height = sharedPref.getInt("height", 1536)
-        val width = sharedPref.getInt("width", 2592)
-        val height = sharedPref.getInt("height", 1944)
-        size.width = width;
-        size.height = height;
-        size.fps = 25;
-        // Toast.makeText(reactContext, "rotate camera error: ${size.width}x${size.height},type:${size.type}, fps:${size.fps}", Toast.LENGTH_SHORT).show()
-        Log.d(TAG, "previewSize: $size")
-        previewSize = size
-        mCameraViewMain.setAspectRatio(size.width, size.height)
-        var control: UVCControl = mCameraHelper!!.uvcControl
-        control.zoomRelative = 500;
-
+        try {
+          val control = uvcControl
+          control.zoomRelative = DEFAULT_ZOOM
+        } catch (t: Throwable) {
+          Log.w(TAG, "Unable to apply default zoom", t)
+        }
         startPreview()
-        if(mCameraHelper!=null){
-          try{
-            mCameraHelper?.previewConfig = mCameraHelper?.previewConfig?.setRotation(180%360);
-
-            if (deviceList != null && deviceList.isNotEmpty()) {
-                var deviceToSelect: UsbDevice = deviceList[0]
-                for (device in deviceList) {
-                    val defaultCameraVendorId = sharedPref.getInt("defaultCameraVendorId", 3034)
-                    if (device.vendorId == defaultCameraVendorId) {
-                        deviceToSelect = device
-                        break
-                    }
-                }
-                if (deviceToSelect == null) {
-                    // No device with vendor ID 3034 found, select the first available device
-                    deviceToSelect = deviceList[0]
-
-                }
-                selectDevice(deviceToSelect)
-            }
-          } catch(e:Exception){
-            // Toast.makeText(reactContext, "rotate camera error: $width, $height", Toast.LENGTH_SHORT).show()
-          }
+        if (hasSurface) {
+          addSurface(mCameraViewMain.holder.surface, false)
         }
-        addSurface(mCameraViewMain.holder.surface, false)
       }
     }
-
-    // override fun onCameraOpen(device: UsbDevice) {
-    //   if (DEBUG) Log.v(TAG, "onCameraOpen:")
-    //   mCameraHelper?.run {
-    //     mCameraViewMain.setRotation(180f)
-
-    //     val portraitSizeList = ArrayList<Size>()
-    //     for (size in supportedSizeList) {
-    //       // if (size.width < size.height) {
-    //         portraitSizeList.add(size)
-    //       // }
-    //     }
-
-    //     Log.d(TAG, "portraitSizeList: $portraitSizeList")
-    //     val size = portraitSizeList[0]
-    //     mCameraViewMain.setAspectRatio(size.width, size.height)
-    //     Log.d(TAG, "previewSize: $size")
-    //     previewSize = size
-    //     startPreview()
-
-    //     addSurface(mCameraViewMain.holder.surface, false)
-
-    //      val videoCaptureConfig = getVideoCaptureConfig()
-
-    //     if (videoCaptureConfig != null) {
-    //         setVideoCaptureConfig(
-    //             videoCaptureConfig
-    //                 // .setAudioCaptureEnable(false)
-    //                 .setBitRate((size.width * size.height * 25 * 0.15).toInt())
-    //                 .setVideoFrameRate(25)
-    //                 .setIFrameInterval(1)
-    //         )
-    //     }else{
-    //       Toast.makeText(reactContext, "videoCaptureConfig is null", Toast.LENGTH_SHORT).show();
-    //     }
-    //   }
-    // }
 
     override fun onCameraClose(device: UsbDevice) {
       if (DEBUG) Log.v(TAG, "onCameraClose:")
@@ -177,180 +122,209 @@ class UVCCameraView(context: Context) : FrameLayout(context) {
     override fun onCancel(device: UsbDevice) {
       if (DEBUG) Log.v(TAG, "onCancel:")
     }
-
-
   }
 
-  private fun selectDevice(device: UsbDevice) {
-    if (DEBUG) Log.v(TAG, "selectDevice:device=" + device.deviceName)
-    mCameraHelper?.selectDevice(device)
+  init {
+    registerLifecycleListener()
+    mCameraViewMain.holder.addCallback(surfaceCallback)
+    addView(mCameraViewMain)
   }
 
-  private fun initCameraHelper() {
-    if (DEBUG) Log.d(TAG, "initCameraHelper:")
-    mCameraHelper = CameraHelper().apply {
-      setStateCallback(mStateListener)
+  private fun registerLifecycleListener() {
+    if (!lifecycleRegistered) {
+      reactContext.addLifecycleEventListener(this)
+      lifecycleRegistered = true
     }
   }
 
-  private fun clearCameraHelper() {
-    if (DEBUG) Log.d(TAG, "clearCameraHelper:")
-    mCameraHelper?.release()
-    mCameraHelper = null
+  private fun unregisterLifecycleListener() {
+    if (lifecycleRegistered) {
+      reactContext.removeLifecycleEventListener(this)
+      lifecycleRegistered = false
+    }
+  }
+
+  override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    ensureCameraHelper()
+  }
+
+  override fun onDetachedFromWindow() {
+    super.onDetachedFromWindow()
+    cleanup()
+  }
+
+  override fun onHostResume() {
+    if (shouldResumeCamera && hasSurface) {
+      post { selectPreferredDevice() }
+    }
+  }
+
+  override fun onHostPause() {
+    closeCameraInternal(keepResumeFlag = true)
+  }
+
+  override fun onHostDestroy() {
+    cleanup()
+  }
+
+  private fun ensureCameraHelper(): ICameraHelper? {
+    if (mCameraHelper == null) {
+      mCameraHelper = CameraHelper().apply {
+        setStateCallback(mStateListener)
+      }
+    }
+    return mCameraHelper
+  }
+
+  private fun selectPreferredDevice(): Boolean {
+    val helper = mCameraHelper ?: return false
+    val devices = helper.deviceList
+    if (devices == null || devices.isEmpty()) {
+      Log.w(TAG, "No UVC devices detected.")
+      return false
+    }
+
+    val preferredVendorId = cameraPrefs.getInt(PREF_VENDOR_ID, DEFAULT_VENDOR_ID)
+    val selectedDevice = devices.firstOrNull { preferredVendorId > 0 && it.vendorId == preferredVendorId }
+      ?: devices.first()
+    if (DEBUG) Log.d(TAG, "Selecting device: ${selectedDevice.deviceName}")
+    helper.selectDevice(selectedDevice)
+    return true
+  }
+
+  private fun configurePreviewSize(helper: ICameraHelper) {
+    val supportedSizes = helper.supportedSizeList
+    if (supportedSizes == null || supportedSizes.isEmpty()) {
+      Log.w(TAG, "No supported preview sizes returned by helper.")
+      return
+    }
+
+    val preferredWidth = cameraPrefs.getInt(PREF_WIDTH, DEFAULT_WIDTH)
+    val preferredHeight = cameraPrefs.getInt(PREF_HEIGHT, DEFAULT_HEIGHT)
+
+    val selectedSize =
+      supportedSizes.minByOrNull { size ->
+        val widthDiff = abs(size.width - preferredWidth)
+        val heightDiff = abs(size.height - preferredHeight)
+        widthDiff + heightDiff
+      } ?: supportedSizes.first()
+
+    helper.previewSize = selectedSize
+    mCameraViewMain.setAspectRatio(selectedSize.width, selectedSize.height)
+  }
+
+  private fun closeCameraInternal(keepResumeFlag: Boolean) {
+    mCameraHelper?.closeCamera()
+    if (!keepResumeFlag) {
+      shouldResumeCamera = false
+    }
   }
 
   fun openCamera() {
-    mCameraHelper?.run {
-      if (deviceList != null && deviceList.size > 0) {
-        if( deviceList.size > 1) {
-          selectDevice(deviceList[1])
-        } else {
-          selectDevice(deviceList[0])
-        }
-      }
+    shouldResumeCamera = true
+    ensureCameraHelper()
+    if (!selectPreferredDevice()) {
+      Log.w(TAG, "openCamera called but no camera was available.")
     }
-
-    // control.zoomAbsolute = 500;
-    // control.focusAuto = true;
   }
-
-  // fun openCamera() {
-  //   mCameraHelper?.run {
-  //     if (deviceList != null && deviceList.size > 0) {
-  //       if( deviceList.size > 1) {
-  //         selectDevice(deviceList[1])
-  //       } else {
-  //         selectDevice(deviceList[0])
-  //       }
-  //     }else{
-  //       //use default camera
-  //       selectDevice(null)
-  //     }
-  //   }
-  // }
-
-fun updateAspectRatio(width: Int, height: Int) {
-    // Toast.makeText(reactContext, "$width X $height", Toast.LENGTH_SHORT).show();
-   //set the values to SharedPreferences
-    val sharedPref = reactContext.getSharedPreferences("camera", Context.MODE_PRIVATE) ?: return
-    with (sharedPref.edit()) {
-        putInt("width", width)
-        putInt("height", height)
-        commit()
-      closeCamera()
-      openCamera()
-    }
-
-}
 
   fun closeCamera() {
+    closeCameraInternal(keepResumeFlag = false)
+  }
+
+  fun updateAspectRatio(width: Int, height: Int) {
+    cameraPrefs.edit()
+      .putInt(PREF_WIDTH, width)
+      .putInt(PREF_HEIGHT, height)
+      .apply()
+
+    if (shouldResumeCamera) {
+      closeCameraInternal(keepResumeFlag = true)
+      post { selectPreferredDevice() }
+    }
+  }
+
+  fun setCameraBright(value: Int) {
+    runCatching {
+      mCameraHelper?.uvcControl?.brightnessPercent = value
+    }.onFailure { Log.w(TAG, "Failed to set brightness", it) }
+  }
+
+  fun setDefaultCameraVendorId(value: Int) {
+    cameraPrefs.edit().putInt(PREF_VENDOR_ID, value).apply()
+    if (shouldResumeCamera) {
+      closeCameraInternal(keepResumeFlag = true)
+      post { selectPreferredDevice() }
+    }
+  }
+
+  fun setContrast(value: Int) {
+    runCatching {
+      mCameraHelper?.uvcControl?.contrast = value
+    }.onFailure { Log.w(TAG, "Failed to set contrast", it) }
+  }
+
+  fun setHue(value: Int) {
+    runCatching {
+      mCameraHelper?.uvcControl?.hue = value
+    }.onFailure { Log.w(TAG, "Failed to set hue", it) }
+  }
+
+  fun setSaturation(value: Int) {
+    runCatching {
+      mCameraHelper?.uvcControl?.saturation = value
+    }.onFailure { Log.w(TAG, "Failed to set saturation", it) }
+  }
+
+  fun setSharpness(value: Int) {
+    runCatching {
+      mCameraHelper?.uvcControl?.sharpness = value
+    }.onFailure { Log.w(TAG, "Failed to set sharpness", it) }
+  }
+
+  fun setZoom(value: Int) {
+    runCatching {
+      mCameraHelper?.uvcControl?.apply {
+        zoomRelative = value
+        focusAuto = true
+      }
+    }.onFailure { Log.w(TAG, "Failed to set zoom", it) }
+  }
+
+  fun rotateCamera() {
+    runCatching {
+      mCameraHelper?.previewConfig = mCameraHelper?.previewConfig?.setMirror(MirrorMode.MIRROR_HORIZONTAL)
+    }.onFailure { Log.w(TAG, "Failed to rotate camera", it) }
+  }
+
+  fun reset() {
+    runCatching {
+      mCameraHelper?.uvcControl?.apply {
+        resetBrightness()
+        resetContrast()
+        resetHue()
+        resetSaturation()
+        resetSharpness()
+      }
+    }.onFailure { Log.w(TAG, "Failed to reset camera controls", it) }
+  }
+
+  fun cleanup() {
+    if (DEBUG) Log.d(TAG, "cleanup()")
+    shouldResumeCamera = false
+    hasSurface = false
+    mCameraHelper?.removeSurface(mCameraViewMain.holder.surface)
     mCameraHelper?.closeCamera()
+    runCatching {
+      mCameraHelper?.release()
+    }.onFailure { Log.w(TAG, "Failed to release camera helper", it) }
+    mCameraHelper = null
+    unregisterLifecycleListener()
   }
 
-  fun  rotateCamera(){
-    if(mCameraHelper!=null){
-     try{
-       mCameraHelper?.previewConfig = mCameraHelper?.previewConfig?.setMirror(MirrorMode.MIRROR_HORIZONTAL);
-     } catch(e:Exception){
-      //  Toast.makeText(reactContext, "rotate camera error", Toast.LENGTH_SHORT).show()
-     }
-    }
-  }
-  fun  setCameraBright(value:Int){
-    if(mCameraHelper!=null){
-      try {
-        var control: UVCControl = mCameraHelper!!.uvcControl
-        control.brightnessPercent = value;
-
-    } catch(e:Exception){
-      // Toast.makeText(reactContext, "Brightness error", Toast.LENGTH_SHORT).show()
-    }
-    }
-  }
-  //set DefaultCameraVendorId to shared preferences
-  fun  setDefaultCameraVendorId(value:Int){
-    //set the values to SharedPreferences
-    val sharedPref = reactContext.getSharedPreferences("camera", Context.MODE_PRIVATE) ?: return
-    with (sharedPref.edit()) {
-        putInt("defaultCameraVendorId", value)
-        commit()
-    }
-  }
-
-  fun  setContast(value:Int) {
-    if (mCameraHelper != null) {
-      try {
-        var control: UVCControl = mCameraHelper!!.uvcControl
-        control.contrast = value;
-      } catch (e: Exception) {
-        // Toast.makeText(reactContext, "contrast error", Toast.LENGTH_SHORT).show()
-      }
-    }
-  }
-  fun  setHue(value:Int){
-      if(mCameraHelper!=null){
-        try {
-          var control: UVCControl = mCameraHelper!!.uvcControl
-          control.hue = value;
-        } catch(e:Exception){
-          // Toast.makeText(reactContext, "Hue error", Toast.LENGTH_SHORT).show()
-        }
-      }
-  }
-  fun  setSaturation(value:Int){
-    if(mCameraHelper!=null){
-      try {
-        var control: UVCControl = mCameraHelper!!.uvcControl
-        control.saturation = value;
-      } catch(e:Exception){
-        // Toast.makeText(reactContext, "saturation error", Toast.LENGTH_SHORT).show()
-      }
-    }
-  }
-  fun  setSharpness(value:Int){
-    if(mCameraHelper!=null){
-      try {
-        var control: UVCControl = mCameraHelper!!.uvcControl
-        control.saturation = value;
-      } catch(e:Exception){
-        // Toast.makeText(reactContext, "Sharpness error ", Toast.LENGTH_SHORT).show()
-      }
-    }
-  }
-
-  //setZoom
-  fun  setZoom(value:Int){
-    if(mCameraHelper!=null){
-      try {
-         var control: UVCControl = mCameraHelper!!.uvcControl
-          control.zoomRelative = value;
-          control.focusAuto = true;
-        // mCameraHelper?.run {
-        //   val control: UVCControl = uvcControl
-        //   // control.zoomAbsolute = value;
-        //   control.zoomRelative = value;
-        //   // control.focusAuto = true;
-        //   // startPreview()
-        // }
-        // Toast.makeText(reactContext, "Zoom value: $value", Toast.LENGTH_SHORT).show()
-      } catch(e:Exception){
-        // Toast.makeText(reactContext, "Zoom error", Toast.LENGTH_SHORT).show()
-      }
-    }
-  }
-
-  fun  reset(){
-    if(mCameraHelper!=null){
-      try {
-        var control: UVCControl = mCameraHelper!!.uvcControl
-        control.resetBrightness()
-        control.resetContrast();
-        control.resetHue();
-        control.resetSaturation();
-        control.resetSharpness();
-      } catch(e:Exception){
-        // Toast.makeText(reactContext, "reset error", Toast.LENGTH_SHORT).show()
-      }
-    }
+  private fun selectDevice(device: UsbDevice) {
+    if (DEBUG) Log.v(TAG, "selectDevice:${device.deviceName}")
+    mCameraHelper?.selectDevice(device)
   }
 }
