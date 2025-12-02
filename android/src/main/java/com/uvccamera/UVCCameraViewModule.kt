@@ -17,47 +17,52 @@ class UVCCameraViewModule(reactContext: ReactApplicationContext?) :
 
   override fun getName() = TAG
 
-  private fun findCameraView(viewId: Int): UVCCameraView {
-    Log.d(TAG, "Finding view $viewId...")
-    val view = if (reactApplicationContext != null) {
-      UIManagerHelper.getUIManager(reactApplicationContext, viewId)
-        ?.resolveView(viewId) as UVCCameraView?
-    } else null
-    Log.d(
-      TAG,
-      if (reactApplicationContext != null) "Found view $viewId!" else "Couldn't find view $viewId!"
-    )
-    return view ?: throw ViewNotFoundError(viewId)
+  private fun resolveCameraView(viewId: Int): UVCCameraView? {
+    val context = reactApplicationContext ?: return null
+    val uiManager = UIManagerHelper.getUIManager(context, viewId)
+    return try {
+      uiManager?.resolveView(viewId) as? UVCCameraView
+    } catch (t: Throwable) {
+      Log.w(TAG, "Failed to resolve view $viewId", t)
+      null
+    }
+  }
+
+  private fun findCameraViewOrNull(viewId: Int): UVCCameraView? {
+    val view = resolveCameraView(viewId)
+    if (view == null) {
+      Log.w(TAG, "Command skipped: view $viewId is not available.")
+    }
+    return view
+  }
+
+  private fun requireCameraView(viewId: Int): UVCCameraView {
+    return resolveCameraView(viewId) ?: throw ViewNotFoundError(viewId)
   }
 
   @ReactMethod
   fun openCamera(viewTag: Int) {
-    val view = findCameraView(viewTag)
-    view.openCamera()
+    findCameraViewOrNull(viewTag)?.openCamera()
   }
 
   @ReactMethod
   fun closeCamera(viewTag: Int) {
-    val view = findCameraView(viewTag)
-    view.closeCamera()
+    findCameraViewOrNull(viewTag)?.closeCamera()
   }
 
   @ReactMethod
   fun updateAspectRatio(viewTag: Int, width: Int, height: Int) {
-    val view = findCameraView(viewTag)
-    view.updateAspectRatio(width, height)
+    findCameraViewOrNull(viewTag)?.updateAspectRatio(width, height)
   }
 
   @ReactMethod
   fun setCameraBright(viewTag: Int, brightness: Int) {
-    val view = findCameraView(viewTag)
-    view.setCameraBright(brightness)
+    findCameraViewOrNull(viewTag)?.setCameraBright(brightness)
   }
 
   @ReactMethod
   fun setContrast(viewTag: Int, contrast: Int) {
-    val view = findCameraView(viewTag)
-    view.setContrast(contrast)
+    findCameraViewOrNull(viewTag)?.setContrast(contrast)
   }
 
   /**
@@ -70,20 +75,17 @@ class UVCCameraViewModule(reactContext: ReactApplicationContext?) :
 
   @ReactMethod
   fun setSaturation(viewTag: Int, saturation: Int) {
-    val view = findCameraView(viewTag)
-    view.setSaturation(saturation)
+    findCameraViewOrNull(viewTag)?.setSaturation(saturation)
   }
 
   @ReactMethod
   fun setSharpness(viewTag: Int, sharpness: Int) {
-    val view = findCameraView(viewTag)
-    view.setSharpness(sharpness)
+    findCameraViewOrNull(viewTag)?.setSharpness(sharpness)
   }
 
   @ReactMethod
   fun setZoom(viewTag: Int, zoom: Int) {
-    val view = findCameraView(viewTag)
-    view.setZoom(zoom)
+    findCameraViewOrNull(viewTag)?.setZoom(zoom)
   }
 
 
@@ -91,7 +93,7 @@ class UVCCameraViewModule(reactContext: ReactApplicationContext?) :
   fun takePhoto(viewTag: Int, promise: Promise) {
     coroutineScope.launch {
       withPromise(promise) {
-        val view = findCameraView(viewTag)
+        val view = requireCameraView(viewTag)
         view.takePhoto()
       }
     }
@@ -99,7 +101,6 @@ class UVCCameraViewModule(reactContext: ReactApplicationContext?) :
 
   @ReactMethod
   fun setDefaultCameraVendorId(viewTag: Int, vendorId: Int) {
-    val view = findCameraView(viewTag)
-    view.setDefaultCameraVendorId(vendorId)
+    findCameraViewOrNull(viewTag)?.setDefaultCameraVendorId(vendorId)
   }
 }
