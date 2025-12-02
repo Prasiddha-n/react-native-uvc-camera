@@ -15,7 +15,7 @@ npm install @prasiddha-n/react-native-uvc-camera
 
 ## Usage
 ```ts
-import { UVCCamera } from "@jaswinda/react-native-uvc-camera";
+import { UVCCamera } from "@prasiddha-n/react-native-uvc-camera";
 
 // ...
 const camera = useRef<UVCCamera>(null);
